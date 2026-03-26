@@ -35,4 +35,9 @@ class SettingsRepository @Inject constructor(
         val current = getSettingsOnce()
         settingsDao.upsert(current.copy(signatureImageUri = uri))
     }
+
+    suspend fun updateDarkMode(enabled: Boolean) {
+        val current = getSettingsOnce()
+        settingsDao.upsert(current.copy(darkMode = enabled))
+    }
 }

@@ -36,4 +36,8 @@ class ControlPanelViewModel @Inject constructor(
     fun updateSignatureUri(uri: String?) {
         viewModelScope.launch { settingsRepository.updateSignatureUri(uri) }
     }
+
+    fun updateDarkMode(enabled: Boolean) {
+        viewModelScope.launch { settingsRepository.updateDarkMode(enabled) }
+    }
 }

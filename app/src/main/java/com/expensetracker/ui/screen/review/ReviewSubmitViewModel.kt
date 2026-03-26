@@ -1,8 +1,13 @@
 package com.expensetracker.ui.screen.review
 
+import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
+import android.widget.Toast
 import androidx.core.content.FileProvider
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -26,6 +31,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 import java.text.NumberFormat
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -82,6 +88,10 @@ class ReviewSubmitViewModel @Inject constructor(
     private val _isGenerating = MutableStateFlow(false)
     val isGenerating: StateFlow<Boolean> = _isGenerating
 
+    // Holds the generated PDF file for the save dialog
+    private val _pendingPdfFile = MutableStateFlow<File?>(null)
+    val pendingPdfFile: StateFlow<File?> = _pendingPdfFile
+
     fun submitBatch(context: Context, onSubmitted: () -> Unit) {
         viewModelScope.launch {
             _isGenerating.value = true
@@ -102,6 +112,9 @@ class ReviewSubmitViewModel @Inject constructor(
                         grandTotal = total
                     )
                 }
+
+                // Store the file so the dialog can offer to save it
+                _pendingPdfFile.value = pdfFile
 
                 val pdfUri = FileProvider.getUriForFile(
                     context,
@@ -135,6 +148,47 @@ class ReviewSubmitViewModel @Inject constructor(
                 _isGenerating.value = false
             }
         }
+    }
+
+    fun savePdfToDownloads(context: Context) {
+        val pdfFile = _pendingPdfFile.value ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    val contentValues = ContentValues().apply {
+                        put(MediaStore.Downloads.DISPLAY_NAME, pdfFile.name)
+                        put(MediaStore.Downloads.MIME_TYPE, "application/pdf")
+                        put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+                    }
+                    val uri = context.contentResolver.insert(
+                        MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues
+                    )
+                    if (uri != null) {
+                        context.contentResolver.openOutputStream(uri)?.use { output ->
+                            pdfFile.inputStream().use { input -> input.copyTo(output) }
+                        }
+                    }
+                } else {
+                    val downloadsDir = Environment.getExternalStoragePublicDirectory(
+                        Environment.DIRECTORY_DOWNLOADS
+                    )
+                    val dest = File(downloadsDir, pdfFile.name)
+                    pdfFile.copyTo(dest, overwrite = true)
+                }
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(context, "PDF saved to Downloads", Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(context, "Failed to save PDF", Toast.LENGTH_SHORT).show()
+                }
+            }
+            _pendingPdfFile.value = null
+        }
+    }
+
+    fun dismissSaveDialog() {
+        _pendingPdfFile.value = null
     }
 
     private fun buildEmailBody(

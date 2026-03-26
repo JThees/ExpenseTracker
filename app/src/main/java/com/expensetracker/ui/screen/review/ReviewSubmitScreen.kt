@@ -15,6 +15,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.foundation.layout.size
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -26,6 +27,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -62,6 +64,7 @@ fun ReviewSubmitScreen(
     val totalMileage by viewModel.totalMileage.collectAsState()
     val settings by viewModel.settings.collectAsState()
     val isGenerating by viewModel.isGenerating.collectAsState()
+    val pendingPdf by viewModel.pendingPdfFile.collectAsState()
     val context = LocalContext.current
     val dateFormat = SimpleDateFormat("MMM dd, yyyy", Locale.getDefault())
     val currencyFormat = NumberFormat.getCurrencyInstance(Locale.US)
@@ -303,5 +306,24 @@ fun ReviewSubmitScreen(
                 Spacer(modifier = Modifier.height(16.dp))
             }
         }
+    }
+
+    // Save PDF to Downloads dialog
+    if (pendingPdf != null) {
+        AlertDialog(
+            onDismissRequest = { viewModel.dismissSaveDialog() },
+            title = { Text("Save PDF") },
+            text = { Text("Would you like to save a copy of the expense report to your Downloads folder?") },
+            confirmButton = {
+                Button(onClick = { viewModel.savePdfToDownloads(context) }) {
+                    Text("Save")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { viewModel.dismissSaveDialog() }) {
+                    Text("No thanks")
+                }
+            }
+        )
     }
 }

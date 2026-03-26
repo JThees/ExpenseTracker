@@ -9,5 +9,6 @@ data class SettingsEntity(
     val mileageRate: Double = 0.67,
     val signatureImageUri: String? = null,
     val emailRecipients: String = "",
-    val senderName: String = ""
+    val senderName: String = "",
+    val darkMode: Boolean = false
 )

@@ -324,7 +324,7 @@ fun AddEditExpenseScreen(
             onDismissRequest = { showDatePicker = false },
             confirmButton = {
                 TextButton(onClick = {
-                    datePickerState.selectedDateMillis?.let { viewModel.setDate(it) }
+                    datePickerState.selectedDateMillis?.let { viewModel.setDate(it + 12 * 60 * 60 * 1000) }
                     showDatePicker = false
                 }) {
                     Text("OK")
