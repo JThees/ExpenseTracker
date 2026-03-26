@@ -12,7 +12,9 @@ import com.expensetracker.data.local.entity.MileageEntryEntity
 import com.expensetracker.data.local.entity.SettingsEntity
 import com.expensetracker.data.repository.BatchRepository
 import com.expensetracker.data.repository.SettingsRepository
+import com.expensetracker.ui.component.PdfReportGenerator
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -23,7 +25,7 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import java.io.File
+import kotlinx.coroutines.withContext
 import java.text.NumberFormat
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -77,86 +79,61 @@ class ReviewSubmitViewModel @Inject constructor(
     val grandTotal: StateFlow<Double> = combine(totalExpenses, totalMileage) { e, m -> e + m }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0.0)
 
+    private val _isGenerating = MutableStateFlow(false)
+    val isGenerating: StateFlow<Boolean> = _isGenerating
+
     fun submitBatch(context: Context, onSubmitted: () -> Unit) {
         viewModelScope.launch {
-            val currentBatch = batch.value ?: return@launch
-            val expenses = expenseItems.value
-            val mileage = mileageEntries.value
-            val currentSettings = settingsRepository.getSettingsOnce()
-            val total = grandTotal.value
+            _isGenerating.value = true
+            try {
+                val currentBatch = batch.value ?: return@launch
+                val expenses = expenseItems.value
+                val mileage = mileageEntries.value
+                val currentSettings = settingsRepository.getSettingsOnce()
+                val total = grandTotal.value
 
-            val emailBody = buildEmailBody(currentBatch, expenses, mileage, total, currentSettings)
-
-            // Collect attachment URIs
-            val attachments = ArrayList<Uri>()
-
-            // Receipt images
-            for (expense in expenses) {
-                expense.receiptImageUri?.let { uriStr ->
-                    val file = File(uriStr)
-                    if (file.exists()) {
-                        val uri = FileProvider.getUriForFile(
-                            context,
-                            "${context.packageName}.fileprovider",
-                            file
-                        )
-                        attachments.add(uri)
-                    } else {
-                        try {
-                            attachments.add(Uri.parse(uriStr))
-                        } catch (_: Exception) {}
-                    }
-                }
-            }
-
-            // Signature image
-            currentSettings.signatureImageUri?.let { uriStr ->
-                val file = File(uriStr)
-                if (file.exists()) {
-                    val uri = FileProvider.getUriForFile(
-                        context,
-                        "${context.packageName}.fileprovider",
-                        file
+                // Generate PDF on IO thread
+                val pdfFile = withContext(Dispatchers.IO) {
+                    PdfReportGenerator(context).generate(
+                        batch = currentBatch,
+                        expenses = expenses,
+                        mileage = mileage,
+                        settings = currentSettings,
+                        grandTotal = total
                     )
-                    attachments.add(uri)
                 }
-            }
 
-            // Build email intent
-            val recipients = currentSettings.emailRecipients
-                .split(",")
-                .map { it.trim() }
-                .filter { it.isNotBlank() }
-                .toTypedArray()
-
-            val intent = if (attachments.size > 1) {
-                Intent(Intent.ACTION_SEND_MULTIPLE).apply {
-                    putParcelableArrayListExtra(Intent.EXTRA_STREAM, attachments)
-                }
-            } else if (attachments.size == 1) {
-                Intent(Intent.ACTION_SEND).apply {
-                    putExtra(Intent.EXTRA_STREAM, attachments[0])
-                }
-            } else {
-                Intent(Intent.ACTION_SEND)
-            }
-
-            intent.apply {
-                type = if (attachments.isNotEmpty()) "message/rfc822" else "text/plain"
-                putExtra(Intent.EXTRA_EMAIL, recipients)
-                putExtra(
-                    Intent.EXTRA_SUBJECT,
-                    "Expense Report: ${currentBatch.title}"
+                val pdfUri = FileProvider.getUriForFile(
+                    context,
+                    "${context.packageName}.fileprovider",
+                    pdfFile
                 )
-                putExtra(Intent.EXTRA_TEXT, emailBody)
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+
+                // Build email body as plain-text fallback summary
+                val emailBody = buildEmailBody(currentBatch, expenses, mileage, total, currentSettings)
+
+                val recipients = currentSettings.emailRecipients
+                    .split(",")
+                    .map { it.trim() }
+                    .filter { it.isNotBlank() }
+                    .toTypedArray()
+
+                val intent = Intent(Intent.ACTION_SEND).apply {
+                    type = "application/pdf"
+                    putExtra(Intent.EXTRA_STREAM, pdfUri)
+                    putExtra(Intent.EXTRA_EMAIL, recipients)
+                    putExtra(Intent.EXTRA_SUBJECT, "Expense Report: ${currentBatch.title}")
+                    putExtra(Intent.EXTRA_TEXT, emailBody)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+
+                context.startActivity(Intent.createChooser(intent, "Send Expense Report"))
+
+                batchRepository.markBatchSubmitted(currentBatch.id)
+                onSubmitted()
+            } finally {
+                _isGenerating.value = false
             }
-
-            context.startActivity(Intent.createChooser(intent, "Send Expense Report"))
-
-            // Mark batch as submitted
-            batchRepository.markBatchSubmitted(currentBatch.id)
-            onSubmitted()
         }
     }
 
@@ -177,45 +154,17 @@ class ReviewSubmitViewModel @Inject constructor(
             sb.appendLine("Submitted by: ${settings.senderName}")
         }
         sb.appendLine()
+        sb.appendLine("Please see the attached PDF for the full expense report with receipt images and signature.")
+        sb.appendLine()
 
+        sb.appendLine("--- SUMMARY ---")
         if (expenses.isNotEmpty()) {
-            sb.appendLine("--- EXPENSES ---")
-            for (item in expenses) {
-                sb.appendLine(
-                    "${dateFormat.format(Date(item.date))} | " +
-                    "${item.category.replaceFirstChar { it.uppercase() }} | " +
-                    "${currencyFormat.format(item.amount)} | " +
-                    item.description
-                )
-                if (item.notes.isNotBlank()) sb.appendLine("  Notes: ${item.notes}")
-                if (item.isSplitItem) sb.appendLine("  (Split item)")
-            }
-            sb.appendLine("Expenses Subtotal: ${currencyFormat.format(expenses.sumOf { it.amount })}")
-            sb.appendLine()
+            sb.appendLine("Expenses: ${currencyFormat.format(expenses.sumOf { it.amount })} (${expenses.size} items)")
         }
-
         if (mileage.isNotEmpty()) {
-            sb.appendLine("--- MILEAGE ---")
-            for (entry in mileage) {
-                sb.appendLine(
-                    "${dateFormat.format(Date(entry.date))} | " +
-                    "${entry.distance} mi @ ${currencyFormat.format(entry.rate)}/mi | " +
-                    currencyFormat.format(entry.calculatedAmount)
-                )
-                if (entry.notes.isNotBlank()) sb.appendLine("  Notes: ${entry.notes}")
-            }
-            sb.appendLine("Mileage Subtotal: ${currencyFormat.format(mileage.sumOf { it.calculatedAmount })}")
-            sb.appendLine()
+            sb.appendLine("Mileage: ${currencyFormat.format(mileage.sumOf { it.calculatedAmount })} (${mileage.size} entries)")
         }
-
-        sb.appendLine("================================")
         sb.appendLine("GRAND TOTAL: ${currencyFormat.format(total)}")
-        sb.appendLine("================================")
-
-        if (batch.notes.isNotBlank()) {
-            sb.appendLine()
-            sb.appendLine("Batch Notes: ${batch.notes}")
-        }
 
         return sb.toString()
     }

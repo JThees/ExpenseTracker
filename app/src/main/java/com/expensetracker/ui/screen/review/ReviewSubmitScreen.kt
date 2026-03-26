@@ -14,9 +14,11 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Send
+import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -59,6 +61,7 @@ fun ReviewSubmitScreen(
     val totalExpenses by viewModel.totalExpenses.collectAsState()
     val totalMileage by viewModel.totalMileage.collectAsState()
     val settings by viewModel.settings.collectAsState()
+    val isGenerating by viewModel.isGenerating.collectAsState()
     val context = LocalContext.current
     val dateFormat = SimpleDateFormat("MMM dd, yyyy", Locale.getDefault())
     val currencyFormat = NumberFormat.getCurrencyInstance(Locale.US)
@@ -282,10 +285,20 @@ fun ReviewSubmitScreen(
                     onClick = { viewModel.submitBatch(context, onSubmitted) },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(56.dp)
+                        .height(56.dp),
+                    enabled = !isGenerating
                 ) {
-                    Icon(Icons.Default.Send, contentDescription = null)
-                    Text("  Submit Expense Report")
+                    if (isGenerating) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(20.dp),
+                            color = MaterialTheme.colorScheme.onPrimary,
+                            strokeWidth = 2.dp
+                        )
+                        Text("  Generating PDF...")
+                    } else {
+                        Icon(Icons.Default.Send, contentDescription = null)
+                        Text("  Submit Expense Report")
+                    }
                 }
                 Spacer(modifier = Modifier.height(16.dp))
             }

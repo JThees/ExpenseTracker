@@ -121,6 +121,12 @@ fun ControlPanelScreen(
                             viewModel.updateSenderName(newValue)
                         },
                         label = { Text("Your name") },
+                        placeholder = {
+                            Text(
+                                "First Last",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                            )
+                        },
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true
                     )

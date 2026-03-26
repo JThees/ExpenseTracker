@@ -12,3 +12,6 @@ local.properties
 /app/schemas
 *.apk
 *.aab
+*.jks
+*.keystore
+.claude/
